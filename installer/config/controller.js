@@ -23,6 +23,22 @@ Controller.prototype.TargetDirectoryPageCallback = function()
     var widget = gui.currentPageWidget()
     widget.TargetDirectoryLineEdit.setEnabled(false)
     widget.BrowseDirectoryButton.setEnabled(false)
+
+    if (systemInfo.kernelType === "darwin" && installer.isInstaller()) {
+        // Reapply the repair-mode guard when the user navigates back from the
+        // ready page and revisits the target directory page.
+        installer.setValue("RemoveTargetDir", "false");
+    }
+}
+
+Controller.prototype.ReadyForInstallationPageCallback = function()
+{
+    if (systemInfo.kernelType === "darwin" && installer.isInstaller()) {
+        // The target-page guard is disabled only to allow replacement of a
+        // stale uninstall.app. Restore the normal setting before IFW records
+        // installation operations and writes the new maintenance tool.
+        installer.setValue("RemoveTargetDir", "true");
+    }
 }
 
 Controller.prototype.onInstallationFinished = function ()

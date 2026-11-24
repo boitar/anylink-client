@@ -725,6 +725,26 @@
           </widget>
          </item>
          <item>
+          <widget class="QPushButton" name="buttonAgentCheck">
+           <property name="focusPolicy">
+            <enum>Qt::FocusPolicy::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>Retry agent</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="buttonCopyDiagnostics">
+           <property name="focusPolicy">
+            <enum>Qt::FocusPolicy::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>Copy diagnostics</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QPushButton" name="buttonSecurityTips">
            <property name="focusPolicy">
             <enum>Qt::FocusPolicy::NoFocus</enum>

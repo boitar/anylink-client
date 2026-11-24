@@ -35,6 +35,8 @@ int main(int argc, char *argv[])
 #else
     QApplication app(argc, argv);
 #endif
+    QApplication::setQuitOnLastWindowClosed(false);
+
     configManager = new ConfigManager();
     // Multiple translation files can be installed.
     // Translations are searched for in the reverse order in which they were installed
@@ -52,12 +54,13 @@ int main(int argc, char *argv[])
 
 
     AnyLink w;
-    w.show();
 
+#if defined(Q_OS_LINUX) || defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    QObject::connect(&app, &SingleApplication::instanceStarted, &w, &AnyLink::showMainWindow);
+#endif
+
+    w.showMainWindow();
     outdateCheck(&w);
-
-    QApplication::setQuitOnLastWindowClosed(false);
-    QObject::connect(&app, &SingleApplication::instanceStarted, &w, &AnyLink::showNormal);
 
     return app.exec();
 }

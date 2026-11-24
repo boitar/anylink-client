@@ -58,6 +58,10 @@ macx {
     QMAKE_INFO_PLIST = resource/mac/Info.plist
     DESTDIR = $$PWD/out/bin
 
+    AGENT_SUPPORT.files = resource/mac/macos-agent-repair.sh resource/mac/macos-agent-health-check.sh
+    AGENT_SUPPORT.path = Contents/Resources
+    QMAKE_BUNDLE_DATA += AGENT_SUPPORT
+
     copyIcon(resource/mac/anylink.icns)
 }
 
