@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QIcon>
 #include <QJsonObject>
+#include <QStringList>
 #include <QTimer>
 
 QT_BEGIN_NAMESPACE
@@ -30,6 +31,9 @@ public:
     ~AnyLink();
 
     JsonRpcWebSocketClient *rpc = nullptr;
+
+    void applyVpnStatus(const QJsonObject &status);
+    DetailDialog *detailsDialog() const { return detailDialog; }
 
 public slots:
     void showMainWindow();
@@ -69,6 +73,7 @@ private:
     bool activeDisconnect = false;
     DetailDialog *detailDialog = nullptr;
     QJsonObject currentProfile = {};
+    QStringList m_upstreamDns;
 
     void center();
     void loadStyleSheet(const QString &styleSheetFile);
@@ -96,6 +101,7 @@ private slots:
     void on_buttonProfile_clicked();
     void on_buttonViewLog_clicked();
     void on_buttonDetails_clicked();
+    void on_buttonCopyDns_clicked();
     void on_buttonSecurityTips_clicked();
     void on_buttonAgentCheck_clicked();
     void on_buttonCopyDiagnostics_clicked();

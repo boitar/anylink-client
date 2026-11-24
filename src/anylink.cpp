@@ -270,6 +270,7 @@ void AnyLink::initConfig()
     ui->checkBoxLang->setChecked(configManager->config["local"].toBool());
     ui->checkBoxCiscoCompat->setChecked(configManager->config["cisco_compat"].toBool());
     ui->checkBoxDtls->setChecked(configManager->config["no_dtls"].toBool());
+    ui->checkBoxNoDns->setChecked(configManager->config["no_dns"].toBool());
 
     connect(ui->checkBoxAutoLogin, &QCheckBox::toggled, this, [this](bool checked) {
         configManager->config["autoLogin"] = checked;
@@ -300,6 +301,11 @@ void AnyLink::initConfig()
     });
     connect(ui->checkBoxDtls, &QCheckBox::toggled, this, [this](bool checked) {
         configManager->config["no_dtls"] = checked;
+        configVPN();
+        saveConfig();
+    });
+    connect(ui->checkBoxNoDns, &QCheckBox::toggled, this, [this](bool checked) {
+        configManager->config["no_dns"] = checked;
         configVPN();
         saveConfig();
     });
@@ -508,8 +514,10 @@ void AnyLink::resetVPNStatus()
     ui->labelVPNAddress->clear();
     ui->labelMTU->clear();
     ui->labelDNS->clear();
+    m_upstreamDns.clear();
 
     ui->buttonDetails->setEnabled(false);
+    ui->buttonCopyDns->setEnabled(false);
     detailDialog->clear();
 
     ui->lineEditOTP->clear();
@@ -531,6 +539,7 @@ void AnyLink::configVPN()
                          {"skip_verify", !ui->checkBoxBlock->isChecked()},
                          {"cisco_compat", ui->checkBoxCiscoCompat->isChecked()},
                          {"no_dtls", ui->checkBoxDtls->isChecked()},
+                         {"no_dns", ui->checkBoxNoDns->isChecked()},
                          {"agent_name", agentName},
                          {"agent_version", appVersion}};
         rpc->callAsync("config", CONFIG, args, [this](const QJsonValue & result) {
@@ -597,27 +606,91 @@ void AnyLink::disconnectVPN()
     }
 }
 
+void AnyLink::applyVpnStatus(const QJsonObject &status)
+{
+    if (status.contains("code")) {
+        return;
+    }
+
+    ensureInitialized();
+
+    ui->labelChannelType->setText(status["DtlsConnected"].toBool() ? "DTLS" : "TLS");
+    ui->labelTlsCipherSuite->setText(status["TLSCipherSuite"].toString());
+    ui->labelDtlsCipherSuite->setText(status["DTLSCipherSuite"].toString());
+    ui->labelDTLSPort->setText(status["DTLSPort"].toString());
+    ui->labelServerAddress->setText(status["ServerAddress"].toString());
+    ui->labelLocalAddress->setText(status["LocalAddress"].toString());
+    ui->labelVPNAddress->setText(status["VPNAddress"].toString());
+    ui->labelMTU->setText(QString::number(status["MTU"].toInt()));
+
+    QStringList dnsServers;
+    for (const QString &entry : status["DNS"].toVariant().toStringList()) {
+        const QString trimmed = entry.trimmed();
+        if (!trimmed.isEmpty()) {
+            dnsServers.append(trimmed);
+        }
+    }
+    m_upstreamDns = dnsServers;
+
+    QStringList splitDnsDomains;
+    for (const QString &entry : status["SplitDNS"].toVariant().toStringList()) {
+        const QString trimmed = entry.trimmed();
+        if (!trimmed.isEmpty()) {
+            splitDnsDomains.append(trimmed);
+        }
+    }
+
+    const QString defaultDomain = status["DefaultDomain"].toString().trimmed();
+    const bool noDnsRequested = configManager->config["no_dns"].toBool();
+    const bool dnsAppliedKnown = status.contains("DNSApplied");
+    const bool dnsApplied = dnsAppliedKnown ? status["DNSApplied"].toBool() : !dnsServers.isEmpty();
+    const QJsonArray splitInclude = status["SplitInclude"].toArray();
+    const QJsonArray splitExclude = status["SplitExclude"].toArray();
+    const bool splitIncludeEmpty = splitInclude.isEmpty();
+
+    if (dnsServers.isEmpty()) {
+        ui->labelDNS->clear();
+    } else if (noDnsRequested && !dnsAppliedKnown) {
+        ui->labelDNS->setText(tr("%1 (Applied - update vpnagent)").arg(dnsServers.join(", ")));
+    } else if (!dnsApplied) {
+        ui->labelDNS->setText(tr("%1 (Not applied)").arg(dnsServers.join(", ")));
+    } else {
+        ui->labelDNS->setText(dnsServers.join(", "));
+    }
+
+    ui->buttonCopyDns->setEnabled(!dnsServers.isEmpty());
+
+    if (!ui->buttonDetails->isEnabled()) {
+        ui->buttonDetails->setEnabled(true);
+    }
+    detailDialog->setRoutes(splitExclude, splitInclude);
+
+    DetailDialog::DnsInfo dnsInfo;
+    dnsInfo.dnsServers = dnsServers;
+    dnsInfo.defaultDomain = defaultDomain;
+    dnsInfo.splitDnsDomains = splitDnsDomains;
+    dnsInfo.noDnsRequested = noDnsRequested;
+    dnsInfo.dnsAppliedKnown = dnsAppliedKnown;
+    dnsInfo.dnsApplied = dnsApplied;
+    dnsInfo.splitIncludeEmpty = splitIncludeEmpty;
+    detailDialog->setDnsInfo(dnsInfo);
+
+    if (noDnsRequested && !dnsAppliedKnown && !dnsServers.isEmpty()) {
+        ui->statusBar->setText(
+            tr("Local vpnagent does not support no_dns yet; system DNS may have been overwritten."));
+    } else if (noDnsRequested && !dnsApplied && splitIncludeEmpty) {
+        ui->statusBar->setText(
+            tr("Connected without overwriting global DNS. Gateway pushed no split-include routes."));
+    } else if (noDnsRequested && !dnsApplied && !dnsServers.isEmpty()) {
+        ui->statusBar->setText(
+            tr("Connected without overwriting global DNS. View or copy upstream DNS in Details."));
+    }
+}
+
 void AnyLink::getVPNStatus()
 {
     rpc->callAsync("status", STATUS, [this](const QJsonValue & result) {
-        const QJsonObject &status = result.toObject();
-        // qDebug() << status;
-        if(!status.contains("code")) {
-            ui->labelChannelType->setText(status["DtlsConnected"].toBool() ? "DTLS" : "TLS");
-            ui->labelTlsCipherSuite->setText(status["TLSCipherSuite"].toString());
-            ui->labelDtlsCipherSuite->setText(status["DTLSCipherSuite"].toString());
-            ui->labelDTLSPort->setText(status["DTLSPort"].toString());
-            ui->labelServerAddress->setText(status["ServerAddress"].toString());
-            ui->labelLocalAddress->setText(status["LocalAddress"].toString());
-            ui->labelVPNAddress->setText(status["VPNAddress"].toString());
-            ui->labelMTU->setText(QString::number(status["MTU"].toInt()));
-            ui->labelDNS->setText(status["DNS"].toVariant().toStringList().join(","));
-
-            if (!ui->buttonDetails->isEnabled()) {
-                ui->buttonDetails->setEnabled(true);
-                detailDialog->setRoutes(status["SplitExclude"].toArray(), status["SplitInclude"].toArray());
-            }
-        }
+        applyVpnStatus(result.toObject());
     });
 }
 
@@ -696,6 +769,21 @@ void AnyLink::on_buttonCopyDiagnostics_clicked()
 void AnyLink::on_buttonDetails_clicked()
 {
     detailDialog->exec();
+}
+
+void AnyLink::on_buttonCopyDns_clicked()
+{
+    if (m_upstreamDns.isEmpty()) {
+        return;
+    }
+
+    const QString copied = detailDialog != nullptr
+        ? detailDialog->copyAllDnsToClipboard()
+        : m_upstreamDns.join(QStringLiteral(", "));
+    if (detailDialog == nullptr) {
+        QApplication::clipboard()->setText(copied);
+    }
+    ui->statusBar->setText(tr("Upstream DNS copied to the clipboard: %1").arg(copied));
 }
 
 void AnyLink::on_buttonSecurityTips_clicked()
