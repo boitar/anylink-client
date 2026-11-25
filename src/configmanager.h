@@ -18,6 +18,7 @@ public:
                        {"debug", false},
                        {"local", true},
                        {"no_dtls", false},
+                       {"no_dns", false},
                        {"cisco_compat", false}};
     bool loadConfig(SaveFormat saveFormat);
     void saveConfig(SaveFormat saveFormat);

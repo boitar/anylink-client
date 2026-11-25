@@ -3,6 +3,12 @@ name: Release
 on:
   workflow_dispatch
 
+env:
+  # The asset id and checksum pin the macOS agent even though the upstream
+  # release is published under the moving "latest" tag.
+  SSLCON_MACOS_ASSET_ID: '455331558'
+  SSLCON_MACOS_ARM64_SHA256: '2f6bb8a643dc94fe71ba55f4624c3efaa95a64e0e465f634e9dbe5c3e6257a2d'
+
 jobs:
   setup:
     name: Setup
@@ -10,7 +16,6 @@ jobs:
   build:
     name: Build
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.build == 'macos-arm64' }}
     strategy:
       fail-fast: false
       matrix:
@@ -197,11 +202,27 @@ jobs:
           cd ../out/bin
           macdeployqt AnyLink.app
           IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | awk -F\" 'NR==1 {print $2}')
-          echo $IDENTITY
-          codesign --deep --force --sign "$IDENTITY" AnyLink.app
-          curl -k -L -O https://github.com/tlslink/sslcon/releases/download/latest/sslcon-macOS-arm64.tar.gz
-          tar -zxvf sslcon-*.tar.gz
+          test -n "$IDENTITY"
+          AGENT_ARCHIVE=sslcon-macOS-arm64.tar.gz
+          curl --fail --location --retry 3 \
+            -H "Accept: application/octet-stream" \
+            -o "$AGENT_ARCHIVE" \
+            "https://api.github.com/repos/tlslink/sslcon/releases/assets/${SSLCON_MACOS_ASSET_ID}"
+          tar -xzf "$AGENT_ARCHIVE"
+          bash ../../scripts/verify-macos-agent.sh \
+            --archive "$AGENT_ARCHIVE" \
+            --binary-dir . \
+            --expected-sha256 "$SSLCON_MACOS_ARM64_SHA256"
           cp vpnagent sslcon AnyLink.app/Contents/MacOS
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+            AnyLink.app/Contents/MacOS/vpnagent
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+            AnyLink.app/Contents/MacOS/sslcon
+          codesign --deep --force --options runtime --timestamp --sign "$IDENTITY" AnyLink.app
+          bash ../../scripts/verify-macos-agent.sh \
+            --archive "$AGENT_ARCHIVE" \
+            --bundle AnyLink.app \
+            --expected-sha256 "$SSLCON_MACOS_ARM64_SHA256"
           mkdir -p ../../installer/packages/root/data
           mkdir -p ../../installer/packages/maintenance/data
           ../../installer/bin/archivegen ../../installer/packages/root/data/anylink.7z ./AnyLink.app

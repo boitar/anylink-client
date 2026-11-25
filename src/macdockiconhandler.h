@@ -24,4 +24,6 @@ private:
     MacDockIconHandler();
 };
 
+void ForceActivation();
+
 #endif // BITCOIN_QT_MACDOCKICONHANDLER_H

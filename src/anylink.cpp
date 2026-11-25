@@ -16,7 +16,7 @@
 
 AnyLink::AnyLink(QWidget *parent)
     : QWidget(parent)
-    , ui(new Ui::AnyLink), m_vpnConnected(false)
+    , ui(new Ui::AnyLink)
 {
     ui->setupUi(this);
 #ifndef Q_OS_MACOS
@@ -72,6 +72,7 @@ AnyLink::AnyLink(QWidget *parent)
                 if (configManager->config["autoLogin"].toBool()) {
                     const QString lastProfile = configManager->config["lastProfile"].toString();
                     if (lastProfile == profile) {
+                        m_autoLoginRequested = true;
                         connectVPN();
                     }
                 }
@@ -81,27 +82,99 @@ AnyLink::AnyLink(QWidget *parent)
     // exit
 }
 
-AnyLink::~AnyLink() { delete ui; }
+AnyLink::~AnyLink()
+{
+    // Closing the socket can synchronously emit an error; keep callbacks from
+    // reaching the UI while the object is being torn down.
+    if (rpc != nullptr) {
+        disconnect(rpc, nullptr, this, nullptr);
+        delete rpc;
+        rpc = nullptr;
+    }
+
+    delete ui;
+}
 
 void AnyLink::closeEvent(QCloseEvent *event)
 {
-    if(m_vpnConnected) {
-        hide();
+    if (m_quitRequested) {
         event->accept();
-        if(!trayIcon->isVisible()) {
-            trayIcon->show();
-        }
-    } else {
-        qApp->quit();
+        return;
     }
+
+    hideMainWindow();
+    event->accept();
 }
 
 void AnyLink::showEvent(QShowEvent *event)
 {
-    if(trayIcon == nullptr) {
-        QTimer::singleShot(50, this, [this]() { afterShowOneTime(); });
+    if (!m_initialized && !m_initializationScheduled) {
+        m_initializationScheduled = true;
+        QTimer::singleShot(50, this, [this]() {
+            m_initializationScheduled = false;
+            ensureInitialized();
+        });
     }
     event->accept();
+}
+
+void AnyLink::showMainWindow()
+{
+    if (m_quitRequested) {
+        return;
+    }
+
+    ensureInitialized();
+    show();
+    showNormal();
+    raise();
+    activateWindow();
+
+#if defined(Q_OS_MACOS)
+    ForceActivation();
+#endif
+}
+
+void AnyLink::ensureInitialized()
+{
+    if (m_initialized) {
+        return;
+    }
+
+    m_initialized = true;
+    afterShowOneTime();
+}
+
+void AnyLink::hideMainWindow()
+{
+    hide();
+    if (trayIcon != nullptr && !trayIcon->isVisible()) {
+        trayIcon->show();
+    }
+}
+
+void AnyLink::quitApplication()
+{
+    if (m_quitRequested) {
+        return;
+    }
+
+    m_quitRequested = true;
+    timer.stop();
+    hide();
+
+    if (m_vpnConnected && rpc != nullptr && rpc->isConnected()) {
+        disconnectVPN();
+        // Give the agent a bounded window to process the disconnect request.
+        QTimer::singleShot(1000, this, [this]() {
+            if (m_quitRequested) {
+                qApp->quit();
+            }
+        });
+        return;
+    }
+
+    qApp->quit();
 }
 
 void AnyLink::center()
@@ -140,19 +213,17 @@ void AnyLink::createTrayActions()
     connect(actionDisconnect, &QAction::triggered, this, &AnyLink::disconnectVPN);
 
     actionConfig = new QAction(tr("Show Panel"), this);
-    connect(actionConfig, &QAction::triggered, this, [this]() {
-        // 有最小化按钮并最小化时 show 不起作用
-        showNormal();
-    });
+    connect(actionConfig, &QAction::triggered, this, &AnyLink::showMainWindow);
+
+    actionRetryAgent = new QAction(tr("Retry Local Agent Connection"), this);
+    connect(actionRetryAgent, &QAction::triggered, this, &AnyLink::on_buttonAgentCheck_clicked);
+
+    actionCopyDiagnostics = new QAction(tr("Copy Agent Diagnostics"), this);
+    connect(actionCopyDiagnostics, &QAction::triggered,
+            this, &AnyLink::on_buttonCopyDiagnostics_clicked);
 
     actionQuit = new QAction(tr("Quit"), this);
-    connect(actionQuit, &QAction::triggered, this, [this]() {
-        // if not connected, the app will quit, see closeEvent
-        close();
-        if(m_vpnConnected) {
-            qApp->quit();
-        }
-    });
+    connect(actionQuit, &QAction::triggered, this, &AnyLink::quitApplication);
 }
 
 void AnyLink::createTrayIcon()
@@ -162,6 +233,8 @@ void AnyLink::createTrayIcon()
     trayIconMenu->addAction(actionDisconnect);
     trayIconMenu->addSeparator();
     trayIconMenu->addAction(actionConfig);
+    trayIconMenu->addAction(actionRetryAgent);
+    trayIconMenu->addAction(actionCopyDiagnostics);
     trayIconMenu->addSeparator();
     trayIconMenu->addAction(actionQuit);
 
@@ -172,7 +245,7 @@ void AnyLink::createTrayIcon()
 #if defined(Q_OS_MACOS)
     // Note: On macOS, the Dock icon is used to provide the tray's functionality.
     MacDockIconHandler* dockIconHandler = MacDockIconHandler::instance();
-    connect(dockIconHandler, &MacDockIconHandler::dockIconClicked, this, [this]() { showNormal(); });
+    connect(dockIconHandler, &MacDockIconHandler::dockIconClicked, this, &AnyLink::showMainWindow);
     trayIconMenu->setAsDockMenu();
 #endif
 
@@ -182,7 +255,7 @@ void AnyLink::createTrayIcon()
             this,
             [this](QSystemTrayIcon::ActivationReason reason) {
                 if (reason == QSystemTrayIcon::Trigger) {
-                    showNormal();
+                    showMainWindow();
                 }
             });
 #endif
@@ -197,6 +270,7 @@ void AnyLink::initConfig()
     ui->checkBoxLang->setChecked(configManager->config["local"].toBool());
     ui->checkBoxCiscoCompat->setChecked(configManager->config["cisco_compat"].toBool());
     ui->checkBoxDtls->setChecked(configManager->config["no_dtls"].toBool());
+    ui->checkBoxNoDns->setChecked(configManager->config["no_dns"].toBool());
 
     connect(ui->checkBoxAutoLogin, &QCheckBox::toggled, this, [this](bool checked) {
         configManager->config["autoLogin"] = checked;
@@ -227,6 +301,11 @@ void AnyLink::initConfig()
     });
     connect(ui->checkBoxDtls, &QCheckBox::toggled, this, [this](bool checked) {
         configManager->config["no_dtls"] = checked;
+        configVPN();
+        saveConfig();
+    });
+    connect(ui->checkBoxNoDns, &QCheckBox::toggled, this, [this](bool checked) {
+        configManager->config["no_dns"] = checked;
         configVPN();
         saveConfig();
     });
@@ -267,7 +346,7 @@ void AnyLink::afterShowOneTime()
         actionConnect->setEnabled(false);
         actionDisconnect->setEnabled(true);
         if(ui->checkBoxMinimize->isChecked()) {
-            close();
+            hideMainWindow();
             trayIcon->setToolTip(tr("Connected to: ") + currentProfile.value("host").toString());
         }
         if (configManager->config["lastProfile"].toString() != ui->comboBoxHost->currentText()) {
@@ -297,21 +376,105 @@ void AnyLink::afterShowOneTime()
     });
 
     connect(qApp, &QApplication::aboutToQuit, this, [this]() {
-        if(m_vpnConnected) {
+        if(m_vpnConnected && !activeDisconnect) {
             disconnectVPN();
         }
     });
 
     rpc = new JsonRpcWebSocketClient(this);
     connect(rpc, &JsonRpcWebSocketClient::error, this, [this](const QString &error) {
-        Q_UNUSED(error)
-        ui->statusBar->setText(tr("Failed to connect to vpnagent, please reinstall the software!"));
-        ui->buttonConnect->setEnabled(false);
-        emit vpnClosed();
-        if(isHidden()) {
-            show();
+        if (!error.isEmpty()) {
+            ui->statusBar->setText(error);
+        }
+        if (m_vpnConnected) {
+            emit vpnClosed();
+        }
+        if (isHidden() && !m_quitRequested) {
+            showMainWindow();
         }
     });
+    connect(rpc, &JsonRpcWebSocketClient::stateChanged, this,
+            [this](JsonRpcWebSocketClient::ConnectionState state) {
+                switch (state) {
+                case JsonRpcWebSocketClient::ConnectionState::Connecting:
+                    ui->statusBar->setText(tr("Connecting to the local vpnagent service..."));
+                    break;
+                case JsonRpcWebSocketClient::ConnectionState::Ready:
+                    ui->statusBar->setText(tr("Local vpnagent service is ready."));
+                    if (m_autoLoginRequested && !m_vpnConnected) {
+                        m_autoLoginRequested = false;
+                        QTimer::singleShot(0, this, [this]() { connectVPN(); });
+                    }
+                    break;
+                case JsonRpcWebSocketClient::ConnectionState::Retrying:
+                    ui->statusBar->setText(
+                        tr("Waiting for the local vpnagent service (retry %1): %2")
+                            .arg(rpc->retryCount())
+                            .arg(rpc->lastError()));
+                    break;
+                case JsonRpcWebSocketClient::ConnectionState::Unavailable:
+                    ui->statusBar->setText(
+                        tr("Local vpnagent unavailable: %1. Check service status, port 6210, "
+                           "and connection logs.")
+                            .arg(rpc->lastError()));
+                    break;
+                case JsonRpcWebSocketClient::ConnectionState::ProtocolError:
+                    ui->statusBar->setText(
+                        tr("Local vpnagent protocol error: %1").arg(rpc->lastError()));
+                    break;
+                case JsonRpcWebSocketClient::ConnectionState::Disconnected:
+                    if (!m_quitRequested) {
+                        ui->statusBar->setText(tr("Local vpnagent service is disconnected."));
+                    }
+                    break;
+                case JsonRpcWebSocketClient::ConnectionState::Unknown:
+                    break;
+                }
+            });
+    connect(rpc, &JsonRpcWebSocketClient::connectionError, this,
+            [this](QAbstractSocket::SocketError socketError,
+                   JsonRpcWebSocketClient::FailureCategory category,
+                   const QString &error,
+                   int retryCount,
+                   bool willRetry) {
+                Q_UNUSED(socketError)
+                QString diagnosis;
+                switch (category) {
+                case JsonRpcWebSocketClient::FailureCategory::ServiceUnavailable:
+                    diagnosis = tr("The service is not installed, not running, or launchd "
+                                    "could not start it.");
+                    break;
+                case JsonRpcWebSocketClient::FailureCategory::PortConflictOrProtocol:
+                    diagnosis = tr("Port 6210 may be occupied by another process or the "
+                                    "local agent rejected the WebSocket protocol.");
+                    break;
+                case JsonRpcWebSocketClient::FailureCategory::TemporarilyUnavailable:
+                    diagnosis = tr("The service may still be starting; the client will retry.");
+                    break;
+                case JsonRpcWebSocketClient::FailureCategory::ProtocolError:
+                    diagnosis = tr("The service returned an invalid JSON-RPC response.");
+                    break;
+                case JsonRpcWebSocketClient::FailureCategory::Unknown:
+                    diagnosis = tr("Check the agent architecture, signature, launchd state, "
+                                    "and connection logs.");
+                    break;
+                case JsonRpcWebSocketClient::FailureCategory::None:
+                    break;
+                }
+                if (willRetry) {
+                    ui->statusBar->setText(
+                        tr("Local vpnagent connection failed (retry %1): %2 %3")
+                            .arg(retryCount)
+                            .arg(diagnosis)
+                            .arg(error));
+                } else {
+                    ui->statusBar->setText(
+                        tr("Local vpnagent connection failed: %1 %2 Use Retry Local Agent "
+                           "Connection or view the logs.")
+                            .arg(diagnosis)
+                            .arg(error));
+                }
+            });
     connect(rpc, &JsonRpcWebSocketClient::connected, this, [this]() {
         configVPN();
     });
@@ -320,8 +483,12 @@ void AnyLink::afterShowOneTime()
         ui->progressBar->stop();
         ui->statusBar->setText(result.toString());
         emit vpnClosed();
+        if (m_quitRequested) {
+            qApp->quit();
+            return;
+        }
         if(!activeDisconnect && isHidden()) {
-            show();
+            showMainWindow();
         }
     });
     // unusual exited
@@ -347,8 +514,10 @@ void AnyLink::resetVPNStatus()
     ui->labelVPNAddress->clear();
     ui->labelMTU->clear();
     ui->labelDNS->clear();
+    m_upstreamDns.clear();
 
     ui->buttonDetails->setEnabled(false);
+    ui->buttonCopyDns->setEnabled(false);
     detailDialog->clear();
 
     ui->lineEditOTP->clear();
@@ -370,6 +539,7 @@ void AnyLink::configVPN()
                          {"skip_verify", !ui->checkBoxBlock->isChecked()},
                          {"cisco_compat", ui->checkBoxCiscoCompat->isChecked()},
                          {"no_dtls", ui->checkBoxDtls->isChecked()},
+                         {"no_dns", ui->checkBoxNoDns->isChecked()},
                          {"agent_name", agentName},
                          {"agent_version", appVersion}};
         rpc->callAsync("config", CONFIG, args, [this](const QJsonValue & result) {
@@ -414,7 +584,7 @@ void AnyLink::connectVPN(bool reconnect)
                     QTimer::singleShot(3000, this, [this]() { connectVPN(); });
                 } else {
                     if (isHidden()) {
-                        show();
+                        showMainWindow();
                     }
                     error(result.toObject().value("message").toString(), this);
                 }
@@ -436,38 +606,105 @@ void AnyLink::disconnectVPN()
     }
 }
 
+void AnyLink::applyVpnStatus(const QJsonObject &status)
+{
+    if (status.contains("code")) {
+        return;
+    }
+
+    ensureInitialized();
+
+    ui->labelChannelType->setText(status["DtlsConnected"].toBool() ? "DTLS" : "TLS");
+    ui->labelTlsCipherSuite->setText(status["TLSCipherSuite"].toString());
+    ui->labelDtlsCipherSuite->setText(status["DTLSCipherSuite"].toString());
+    ui->labelDTLSPort->setText(status["DTLSPort"].toString());
+    ui->labelServerAddress->setText(status["ServerAddress"].toString());
+    ui->labelLocalAddress->setText(status["LocalAddress"].toString());
+    ui->labelVPNAddress->setText(status["VPNAddress"].toString());
+    ui->labelMTU->setText(QString::number(status["MTU"].toInt()));
+
+    QStringList dnsServers;
+    for (const QString &entry : status["DNS"].toVariant().toStringList()) {
+        const QString trimmed = entry.trimmed();
+        if (!trimmed.isEmpty()) {
+            dnsServers.append(trimmed);
+        }
+    }
+    m_upstreamDns = dnsServers;
+
+    QStringList splitDnsDomains;
+    for (const QString &entry : status["SplitDNS"].toVariant().toStringList()) {
+        const QString trimmed = entry.trimmed();
+        if (!trimmed.isEmpty()) {
+            splitDnsDomains.append(trimmed);
+        }
+    }
+
+    const QString defaultDomain = status["DefaultDomain"].toString().trimmed();
+    const bool noDnsRequested = configManager->config["no_dns"].toBool();
+    const bool dnsAppliedKnown = status.contains("DNSApplied");
+    const bool dnsApplied = dnsAppliedKnown ? status["DNSApplied"].toBool() : !dnsServers.isEmpty();
+    const QJsonArray splitInclude = status["SplitInclude"].toArray();
+    const QJsonArray splitExclude = status["SplitExclude"].toArray();
+    const bool splitIncludeEmpty = splitInclude.isEmpty();
+
+    if (dnsServers.isEmpty()) {
+        ui->labelDNS->clear();
+    } else if (noDnsRequested && !dnsAppliedKnown) {
+        ui->labelDNS->setText(tr("%1 (Applied - update vpnagent)").arg(dnsServers.join(", ")));
+    } else if (!dnsApplied) {
+        ui->labelDNS->setText(tr("%1 (Not applied)").arg(dnsServers.join(", ")));
+    } else {
+        ui->labelDNS->setText(dnsServers.join(", "));
+    }
+
+    ui->buttonCopyDns->setEnabled(!dnsServers.isEmpty());
+
+    if (!ui->buttonDetails->isEnabled()) {
+        ui->buttonDetails->setEnabled(true);
+    }
+    detailDialog->setRoutes(splitExclude, splitInclude);
+
+    DetailDialog::DnsInfo dnsInfo;
+    dnsInfo.dnsServers = dnsServers;
+    dnsInfo.defaultDomain = defaultDomain;
+    dnsInfo.splitDnsDomains = splitDnsDomains;
+    dnsInfo.noDnsRequested = noDnsRequested;
+    dnsInfo.dnsAppliedKnown = dnsAppliedKnown;
+    dnsInfo.dnsApplied = dnsApplied;
+    dnsInfo.splitIncludeEmpty = splitIncludeEmpty;
+    detailDialog->setDnsInfo(dnsInfo);
+
+    if (noDnsRequested && !dnsAppliedKnown && !dnsServers.isEmpty()) {
+        ui->statusBar->setText(
+            tr("Local vpnagent does not support no_dns yet; system DNS may have been overwritten."));
+    } else if (noDnsRequested && !dnsApplied && splitIncludeEmpty) {
+        ui->statusBar->setText(
+            tr("Connected without overwriting global DNS. Gateway pushed no split-include routes."));
+    } else if (noDnsRequested && !dnsApplied && !dnsServers.isEmpty()) {
+        ui->statusBar->setText(
+            tr("Connected without overwriting global DNS. View or copy upstream DNS in Details."));
+    }
+}
+
 void AnyLink::getVPNStatus()
 {
     rpc->callAsync("status", STATUS, [this](const QJsonValue & result) {
-        const QJsonObject &status = result.toObject();
-        // qDebug() << status;
-        if(!status.contains("code")) {
-            ui->labelChannelType->setText(status["DtlsConnected"].toBool() ? "DTLS" : "TLS");
-            ui->labelTlsCipherSuite->setText(status["TLSCipherSuite"].toString());
-            ui->labelDtlsCipherSuite->setText(status["DTLSCipherSuite"].toString());
-            ui->labelDTLSPort->setText(status["DTLSPort"].toString());
-            ui->labelServerAddress->setText(status["ServerAddress"].toString());
-            ui->labelLocalAddress->setText(status["LocalAddress"].toString());
-            ui->labelVPNAddress->setText(status["VPNAddress"].toString());
-            ui->labelMTU->setText(QString::number(status["MTU"].toInt()));
-            ui->labelDNS->setText(status["DNS"].toVariant().toStringList().join(","));
-
-            if (!ui->buttonDetails->isEnabled()) {
-                ui->buttonDetails->setEnabled(true);
-                detailDialog->setRoutes(status["SplitExclude"].toArray(), status["SplitInclude"].toArray());
-            }
-        }
+        applyVpnStatus(result.toObject());
     });
 }
 
 void AnyLink::on_buttonConnect_clicked()
 {
-    if(rpc->isConnected()) {
-        if(m_vpnConnected) {
-            disconnectVPN();
-        } else {
-            connectVPN();
-        }
+    if (rpc == nullptr || !rpc->isConnected()) {
+        on_buttonAgentCheck_clicked();
+        return;
+    }
+
+    if(m_vpnConnected) {
+        disconnectVPN();
+    } else {
+        connectVPN();
     }
 }
 
@@ -509,9 +746,44 @@ void AnyLink::on_buttonViewLog_clicked()
     textBrowser.exec();
 }
 
+void AnyLink::on_buttonAgentCheck_clicked()
+{
+    if (rpc == nullptr) {
+        return;
+    }
+
+    ui->statusBar->setText(tr("Checking the local vpnagent service..."));
+    rpc->retryNow();
+}
+
+void AnyLink::on_buttonCopyDiagnostics_clicked()
+{
+    if (rpc == nullptr) {
+        return;
+    }
+
+    QApplication::clipboard()->setText(rpc->diagnosticReport());
+    ui->statusBar->setText(tr("Agent diagnostics copied to the clipboard."));
+}
+
 void AnyLink::on_buttonDetails_clicked()
 {
     detailDialog->exec();
+}
+
+void AnyLink::on_buttonCopyDns_clicked()
+{
+    if (m_upstreamDns.isEmpty()) {
+        return;
+    }
+
+    const QString copied = detailDialog != nullptr
+        ? detailDialog->copyAllDnsToClipboard()
+        : m_upstreamDns.join(QStringLiteral(", "));
+    if (detailDialog == nullptr) {
+        QApplication::clipboard()->setText(copied);
+    }
+    ui->statusBar->setText(tr("Upstream DNS copied to the clipboard: %1").arg(copied));
 }
 
 void AnyLink::on_buttonSecurityTips_clicked()

@@ -503,14 +503,28 @@
         </spacer>
        </item>
        <item row="2" column="1">
-        <widget class="QPushButton" name="buttonDetails">
-         <property name="enabled">
-          <bool>false</bool>
-         </property>
-         <property name="text">
-          <string>Details</string>
-         </property>
-        </widget>
+        <layout class="QHBoxLayout" name="horizontalLayoutStatusButtons">
+         <item>
+          <widget class="QPushButton" name="buttonDetails">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="text">
+            <string>Details</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="buttonCopyDns">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="text">
+            <string>Copy DNS</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </item>
        <item row="2" column="2">
         <spacer name="horizontalSpacer_7">
@@ -586,6 +600,13 @@
           <widget class="QCheckBox" name="checkBoxDtls">
            <property name="text">
             <string>Disable creation of DTLS channel</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="checkBoxNoDns">
+           <property name="text">
+            <string>Do not overwrite global DNS (compatible with TUN proxies)</string>
            </property>
           </widget>
          </item>
@@ -721,6 +742,26 @@
            </property>
            <property name="text">
             <string>Connection logs</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="buttonAgentCheck">
+           <property name="focusPolicy">
+            <enum>Qt::FocusPolicy::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>Retry agent</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="buttonCopyDiagnostics">
+           <property name="focusPolicy">
+            <enum>Qt::FocusPolicy::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>Copy diagnostics</string>
            </property>
           </widget>
          </item>

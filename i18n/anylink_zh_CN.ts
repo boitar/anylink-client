@@ -95,6 +95,10 @@
         <translation>详情</translation>
     </message>
     <message>
+        <source>Copy DNS</source>
+        <translation>复制 DNS</translation>
+    </message>
+    <message>
         <location line="+21"/>
         <source>Setting</source>
         <translation>设置</translation>
@@ -113,6 +117,10 @@
         <location line="+28"/>
         <source>Disable creation of DTLS channel</source>
         <translation>不使用 DTLS 通道</translation>
+    </message>
+    <message>
+        <source>Do not overwrite global DNS (compatible with TUN proxies)</source>
+        <translation>不改写系统全局 DNS（兼容 Surge 等 TUN 代理）</translation>
     </message>
     <message>
         <location line="+135"/>
@@ -214,6 +222,30 @@
         <source>Security Tips</source>
         <translation>安全提醒</translation>
     </message>
+    <message>
+        <source>%1 (Applied - update vpnagent)</source>
+        <translation>%1（已应用 - 请更新 vpnagent）</translation>
+    </message>
+    <message>
+        <source>%1 (Not applied)</source>
+        <translation>%1（未应用到全局）</translation>
+    </message>
+    <message>
+        <source>Local vpnagent does not support no_dns yet; system DNS may have been overwritten.</source>
+        <translation>当前本地 vpnagent 暂不支持不改写全局 DNS，系统 DNS 可能已被覆盖，请更新 vpnagent。</translation>
+    </message>
+    <message>
+        <source>Connected without overwriting global DNS. Gateway pushed no split-include routes.</source>
+        <translation>已连接且未改写全局 DNS；网关未下发分流网段，默认路由未被接管。</translation>
+    </message>
+    <message>
+        <source>Connected without overwriting global DNS. View or copy upstream DNS in Details.</source>
+        <translation>已连接且未改写全局 DNS，可在“详情”中查看或复制上游 DNS。</translation>
+    </message>
+    <message>
+        <source>Upstream DNS copied to the clipboard: %1</source>
+        <translation>已复制上游 DNS 到剪贴板：%1</translation>
+    </message>
 </context>
 <context>
     <name>ConfigManager</name>
@@ -265,6 +297,62 @@
         <location line="+0"/>
         <source>Prefix</source>
         <translation>前缀</translation>
+    </message>
+    <message>
+        <source>Upstream DNS</source>
+        <translation>上游 DNS</translation>
+    </message>
+    <message>
+        <source>Copy Selected</source>
+        <translation>复制选中项</translation>
+    </message>
+    <message>
+        <source>Copy All DNS</source>
+        <translation>复制全部 DNS</translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation>类型</translation>
+    </message>
+    <message>
+        <source>Value</source>
+        <translation>值</translation>
+    </message>
+    <message>
+        <source>DNS Server</source>
+        <translation>DNS 服务器</translation>
+    </message>
+    <message>
+        <source>Default Domain</source>
+        <translation>默认域名</translation>
+    </message>
+    <message>
+        <source>Split DNS Domain</source>
+        <translation>分流 DNS 域名</translation>
+    </message>
+    <message>
+        <source>No upstream DNS servers were pushed by the gateway.</source>
+        <translation>网关未下发上游 DNS 服务器。</translation>
+    </message>
+    <message>
+        <source>Warning: local vpnagent did not report DNSApplied and may still have overwritten system DNS. Please update vpnagent.</source>
+        <translation>警告：本地 vpnagent 未返回 DNSApplied 状态，系统 DNS 可能仍已被覆盖，请更新 vpnagent。</translation>
+    </message>
+    <message>
+        <source>Not applied to system (global DNS override disabled). Gateway pushed no split-include routes, so the system default route was not changed.</source>
+        <translation>未应用到系统（已禁用全局 DNS 改写）。网关未下发分流网段，因此未修改系统默认路由。</translation>
+    </message>
+    <message>
+        <source>Not applied to system (global DNS override disabled). Double-click a row or use the buttons to copy for Surge / other DNS tools.</source>
+        <translation>未应用到系统（已禁用全局 DNS 改写）。可双击条目或点击按钮复制，用于配置 Surge 等工具。</translation>
+    </message>
+    <message>
+        <source>Applied to system DNS.</source>
+        <translation>已应用到系统 DNS。</translation>
+    </message>
+    <message>
+        <source>Copied to clipboard: %1</source>
+        <translation>已复制到剪贴板：%1</translation>
     </message>
 </context>
 <context>

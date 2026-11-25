@@ -9,20 +9,24 @@
 
 static MacDockIconHandler *s_instance = nullptr;
 
-bool dockClickHandler(id self, SEL _cmd, ...) {
+static BOOL dockClickHandler(id self, SEL _cmd, NSApplication *application, BOOL hasVisibleWindows) {
     Q_UNUSED(self)
     Q_UNUSED(_cmd)
+    Q_UNUSED(application)
+    Q_UNUSED(hasVisibleWindows)
 
-    Q_EMIT s_instance->dockIconClicked();
+    if (s_instance != nullptr) {
+        Q_EMIT s_instance->dockIconClicked();
+    }
 
-    // Return NO (false) to suppress the default macOS actions
-    return false;
+    // Let AppKit perform its normal reopen handling after the Qt window is restored.
+    return YES;
 }
 
 void setupDockClickHandler() {
     Class delClass = (Class)[[[NSApplication sharedApplication] delegate] class];
     SEL shouldHandle = sel_registerName("applicationShouldHandleReopen:hasVisibleWindows:");
-    class_replaceMethod(delClass, shouldHandle, (IMP)dockClickHandler, "B@:");
+    class_replaceMethod(delClass, shouldHandle, (IMP)dockClickHandler, "B@:@B");
 }
 
 MacDockIconHandler::MacDockIconHandler() : QObject()
@@ -40,6 +44,7 @@ MacDockIconHandler *MacDockIconHandler::instance()
 void MacDockIconHandler::cleanup()
 {
     delete s_instance;
+    s_instance = nullptr;
 }
 
 /**
